@@ -1,0 +1,27 @@
+apply plugin: 'com.android.application'
+
+android {
+    compileSdkVersion 26
+    buildToolsVersion "27.0.3"
+
+    defaultConfig {
+        applicationId "com.example.android.lunarlander"
+        targetSdkVersion 17
+
+        testApplicationId "com.example.android.lunarlander.tests"
+        testInstrumentationRunner "android.test.InstrumentationTestRunner"
+    }
+
+    dependencies {
+        compile 'org.eclipse.paho:org.eclipse.paho.client.mqttv3:1.0.2'
+        compile 'org.eclipse.paho:org.eclipse.paho.android.service:1.0.2'
+    }
+
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.txt'
+        }
+    }
+}
