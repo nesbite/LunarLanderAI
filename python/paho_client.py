@@ -1,9 +1,13 @@
 import paho.mqtt.client as mqtt
 import time 
 import sys
+import random
 
 pub_topic = "DATA_FROM_AI"
 sub_topic = "DATA_FROM_ANDROID"
+KEYEVENT_DPAD_LEFT = 21
+KEYEVENT_DPAD_RIGHT = 22
+KEYEVENT_SPACE = 62
 
 # The callback for when the client receives a CONNACK response from the server.
 def on_connect(client, userdata, flags, rc):
@@ -15,7 +19,7 @@ def on_connect(client, userdata, flags, rc):
 # The callback for when a PUBLISH message is received from the server.
 def on_message(client, userdata, msg):
     print("Message received: " + str(msg.payload) + ", topic: " + msg.topic)
-    client.publish(pub_topic, payload="Message from LunarLanderAI")
+    client.publish(pub_topic, payload=random.choice([KEYEVENT_DPAD_LEFT, KEYEVENT_DPAD_RIGHT, KEYEVENT_SPACE]))
 
 client = mqtt.Client("LunarLanderAI")
 client.on_connect = on_connect

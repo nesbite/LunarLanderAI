@@ -16,6 +16,7 @@
 
 package com.example.android.lunarlander;
 
+import android.app.Instrumentation;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -44,10 +45,13 @@ import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.MqttTopic;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
 
+import java.util.HashMap;
+import java.util.Map;
+
 
 /**
  * View that draws, takes keystrokes, etc. for a simple LunarLander game.
- *
+ * <p>
  * Has a mode which RUNNING, PAUSED, etc. Has a x, y, dx, dy, ... capturing the
  * current ship physics. All x/y etc. are measured with (0,0) at the lower left.
  * updatePhysics() advances the physics based on realtime. draw() renders the
@@ -117,7 +121,9 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         /*
          * Member (state) fields
          */
-        /** The drawable to use as the background of the animation canvas */
+        /**
+         * The drawable to use as the background of the animation canvas
+         */
         private Bitmap mBackgroundImage;
 
         /**
@@ -134,7 +140,9 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          */
         private int mCanvasWidth = 1;
 
-        /** What to draw for the Lander when it has crashed */
+        /**
+         * What to draw for the Lander when it has crashed
+         */
         private Drawable mCrashedImage;
 
         /**
@@ -143,34 +151,54 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          */
         private int mDifficulty;
 
-        /** Velocity dx. */
+        /**
+         * Velocity dx.
+         */
         private double mDX;
 
-        /** Velocity dy. */
+        /**
+         * Velocity dy.
+         */
         private double mDY;
 
-        /** Is the engine burning? */
+        /**
+         * Is the engine burning?
+         */
         private boolean mEngineFiring;
 
-        /** What to draw for the Lander when the engine is firing */
+        /**
+         * What to draw for the Lander when the engine is firing
+         */
         private Drawable mFiringImage;
 
-        /** Fuel remaining */
+        /**
+         * Fuel remaining
+         */
         private double mFuel;
 
-        /** Allowed angle. */
+        /**
+         * Allowed angle.
+         */
         private int mGoalAngle;
 
-        /** Allowed speed. */
+        /**
+         * Allowed speed.
+         */
         private int mGoalSpeed;
 
-        /** Width of the landing pad. */
+        /**
+         * Width of the landing pad.
+         */
         private int mGoalWidth;
 
-        /** X of the landing pad. */
+        /**
+         * X of the landing pad.
+         */
         private int mGoalX;
 
-        /** Message handler used by thread to interact with TextView */
+        /**
+         * Message handler used by thread to interact with TextView
+         */
         private Handler mHandler;
 
         /**
@@ -179,54 +207,83 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          */
         private double mHeading;
 
-        /** Pixel height of lander image. */
+        /**
+         * Pixel height of lander image.
+         */
         private int mLanderHeight;
 
-        /** What to draw for the Lander in its normal state */
+        /**
+         * What to draw for the Lander in its normal state
+         */
         private Drawable mLanderImage;
 
-        /** Pixel width of lander image. */
+        /**
+         * Pixel width of lander image.
+         */
         private int mLanderWidth;
 
-        /** Used to figure out elapsed time between frames */
+        /**
+         * Used to figure out elapsed time between frames
+         */
         private long mLastTime;
 
-        /** Paint to draw the lines on screen. */
+        /**
+         * Paint to draw the lines on screen.
+         */
         private Paint mLinePaint;
 
-        /** "Bad" speed-too-high variant of the line color. */
+        /**
+         * "Bad" speed-too-high variant of the line color.
+         */
         private Paint mLinePaintBad;
 
-        /** The state of the game. One of READY, RUNNING, PAUSE, LOSE, or WIN */
+        /**
+         * The state of the game. One of READY, RUNNING, PAUSE, LOSE, or WIN
+         */
         private int mMode;
 
-        /** Currently rotating, -1 left, 0 none, 1 right. */
+        /**
+         * Currently rotating, -1 left, 0 none, 1 right.
+         */
         private int mRotating;
 
-        /** Indicate whether the surface has been created & is ready to draw */
+        /**
+         * Indicate whether the surface has been created & is ready to draw
+         */
         private boolean mRun = false;
 
-        /** Scratch rect object. */
+        /**
+         * Scratch rect object.
+         */
         private RectF mScratchRect;
 
-        /** Handle to the surface manager object we interact with */
+        /**
+         * Handle to the surface manager object we interact with
+         */
         private SurfaceHolder mSurfaceHolder;
 
-        /** Number of wins in a row. */
+        /**
+         * Number of wins in a row.
+         */
         private int mWinsInARow;
 
-        /** X of lander center. */
+        /**
+         * X of lander center.
+         */
         private double mX;
 
-        /** Y of lander center. */
+        /**
+         * Y of lander center.
+         */
         private double mY;
 
         private MqttClient mqttClient;
+        private MqttTopic mqttTopic;
         private String pub_topic = "DATA_FROM_ANDROID";
         private String sub_topic = "DATA_FROM_AI";
 
         public LunarThread(SurfaceHolder surfaceHolder, Context context,
-                Handler handler) {
+                           Handler handler) {
             // get handles to some important objects
             mSurfaceHolder = surfaceHolder;
             mHandler = handler;
@@ -273,7 +330,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
             mHeading = 0;
             mEngineFiring = true;
 
-            
+
             String broker = "tcp://192.168.2.101:1883";
             String clientId = "AndroidLunarLander";
 
@@ -287,7 +344,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                 System.out.println("Connected");
                 mqttClient.subscribe(sub_topic);
 
-
+                mqttTopic = mqttClient.getTopic(pub_topic);
                 mqttClient.setCallback(new MqttCallback() {
                     @Override
                     public void connectionLost(Throwable cause) {
@@ -297,18 +354,15 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                     @Override
                     public void messageArrived(String topic, MqttMessage message) throws Exception {
                         System.out.println("Message arrived: " + message + ", topic:" + topic);
+                        int keyCode = Integer.parseInt(message.toString());
 
-                        //@TODO: perform action returned from AI
+                        if (mMode == STATE_RUNNING) {
+                            dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, keyCode));
+                            Thread.sleep(100);
+                            dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keyCode));
 
-
-                        //TODO: send current game state to AI
-                        MqttTopic mqttTopic = mqttClient.getTopic(pub_topic);
-                        String content = "Message from Android client";
-                        MqttMessage androidMessage = new MqttMessage(content.getBytes());
-                        androidMessage.setQos(2);
-                        sleep(1000);
-                        MqttDeliveryToken token = mqttTopic.publish(androidMessage);
-                        System.out.println("Message published");
+                            publishCurrentGameState();
+                        }
                     }
 
                     @Override
@@ -316,9 +370,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                         System.out.println("Delivery complete");
                     }
                 });
-                mqttClient.publish(sub_topic, new MqttMessage("Message from Android client".getBytes()));
 
-            } catch(MqttException me) {
+            } catch (MqttException me) {
                 System.out.println("reason " + me.getReasonCode());
                 System.out.println("msg " + me.getMessage());
                 System.out.println("loc " + me.getLocalizedMessage());
@@ -326,6 +379,31 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                 System.out.println("excep " + me);
                 me.printStackTrace();
             }
+        }
+
+        private void publishCurrentGameState() throws MqttException {
+
+            Map<String, Object> map = new HashMap<>();
+
+            map.put(KEY_DIFFICULTY, mDifficulty);
+            map.put(KEY_X, mX);
+            map.put(KEY_Y, mY);
+            map.put(KEY_DX, mDX);
+            map.put(KEY_DY, mDY);
+            map.put(KEY_HEADING, mHeading);
+            map.put(KEY_LANDER_WIDTH, mLanderWidth);
+            map.put(KEY_LANDER_HEIGHT, mLanderHeight);
+            map.put(KEY_GOAL_X, mGoalX);
+            map.put(KEY_GOAL_SPEED, mGoalSpeed);
+            map.put(KEY_GOAL_ANGLE, mGoalAngle);
+            map.put(KEY_GOAL_WIDTH, mGoalWidth);
+            map.put(KEY_WINS, mWinsInARow);
+            map.put(KEY_FUEL, mFuel);
+
+            MqttMessage androidMessage = new MqttMessage(map.toString().getBytes());
+            androidMessage.setQos(2);
+            mqttTopic.publish(androidMessage);
+            System.out.println("Message published");
         }
 
         /**
@@ -502,8 +580,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Sets the game mode. That is, whether we are running, paused, in the
          * failure state, in the victory state, etc.
          *
-         * @see #setState(int, CharSequence)
          * @param mode one of the STATE_* constants
+         * @see #setState(int, CharSequence)
          */
         public void setState(int mode) {
             synchronized (mSurfaceHolder) {
@@ -515,7 +593,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Sets the game mode. That is, whether we are running, paused, in the
          * failure state, in the victory state, etc.
          *
-         * @param mode one of the STATE_* constants
+         * @param mode    one of the STATE_* constants
          * @param message string to add to screen or null
          */
         public void setState(int mode, CharSequence message) {
@@ -537,6 +615,11 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                     b.putInt("viz", View.INVISIBLE);
                     msg.setData(b);
                     mHandler.sendMessage(msg);
+                    try {
+                        publishCurrentGameState();
+                    } catch (MqttException e) {
+                        e.printStackTrace();
+                    }
                 } else {
                     mRotating = 0;
                     mEngineFiring = false;
@@ -597,7 +680,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Handles a key-down event.
          *
          * @param keyCode the key that was pressed
-         * @param msg the original event object
+         * @param msg     the original event object
          * @return true
          */
         boolean doKeyDown(int keyCode, KeyEvent msg) {
@@ -647,7 +730,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Handles a key-up event.
          *
          * @param keyCode the key that was pressed
-         * @param msg the original event object
+         * @param msg     the original event object
          * @return true if the key was handled and consumed, or else false
          */
         boolean doKeyUp(int keyCode, KeyEvent msg) {
@@ -803,9 +886,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
 
             mLastTime = now;
 
-            System.out.println(mX);
-            System.out.println(mY);
-
             // Evaluate if we have landed ... stop the game
             double yLowerBound = TARGET_PAD_HEIGHT + mLanderHeight / 2
                     - TARGET_BOTTOM_PADDING;
@@ -845,13 +925,19 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
-    /** Handle to the application context, used to e.g. fetch Drawables. */
+    /**
+     * Handle to the application context, used to e.g. fetch Drawables.
+     */
     private Context mContext;
 
-    /** Pointer to the text view to display "Paused.." etc. */
+    /**
+     * Pointer to the text view to display "Paused.." etc.
+     */
     private TextView mStatusText;
 
-    /** The thread that actually draws the animation */
+    /**
+     * The thread that actually draws the animation
+     */
     private LunarThread thread;
 
     public LunarView(Context context, AttributeSet attrs) {
@@ -887,6 +973,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
      */
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent msg) {
+        System.out.println(keyCode);
         return thread.doKeyDown(keyCode, msg);
     }
 
@@ -896,6 +983,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
      */
     @Override
     public boolean onKeyUp(int keyCode, KeyEvent msg) {
+        System.out.println(keyCode);
         return thread.doKeyUp(keyCode, msg);
     }
 
@@ -917,7 +1005,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
 
     /* Callback invoked when the surface dimensions change. */
     public void surfaceChanged(SurfaceHolder holder, int format, int width,
-            int height) {
+                               int height) {
         thread.setSurfaceSize(width, height);
     }
 
