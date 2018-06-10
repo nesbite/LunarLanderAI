@@ -16,11 +16,15 @@
 
 package com.example.android.lunarlander;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.MotionEvent;
+import android.view.View;
+import android.widget.Button;
 import android.widget.TextView;
 
 import com.example.android.lunarlander.LunarView.LunarThread;
@@ -49,11 +53,24 @@ public class LunarLander extends Activity {
 
     private static final int MENU_STOP = 7;
 
-    /** A handle to the thread that's actually running the animation. */
+    /**
+     * A handle to the thread that's actually running the animation.
+     */
     private LunarThread mLunarThread;
 
-    /** A handle to the View in which the game is running. */
+    /**
+     * A handle to the View in which the game is running.
+     */
     private LunarView mLunarView;
+
+    /**
+     * Buttons for handling lunar lander
+     */
+    private Button controlButton;
+    private Button leftButton;
+    private Button rightButton;
+    private Button engineButton;
+
 
     /**
      * Invoked during init to give the Activity a chance to set up its Menu.
@@ -81,7 +98,7 @@ public class LunarLander extends Activity {
      *
      * @param item the Menu entry which was selected
      * @return true if the Menu item was legit (and we consumed it), false
-     *         otherwise
+     * otherwise
      */
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
@@ -117,8 +134,9 @@ public class LunarLander extends Activity {
      * Invoked when the Activity is created.
      *
      * @param savedInstanceState a Bundle containing state saved from a previous
-     *        execution, or null if this is a new execution
+     *                           execution, or null if this is a new execution
      */
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -127,12 +145,23 @@ public class LunarLander extends Activity {
         setContentView(R.layout.lunar_layout);
 
         // get handles to the LunarView from XML, and its LunarThread
-        mLunarView = (LunarView) findViewById(R.id.lunar);
+        mLunarView = findViewById(R.id.lunar);
         mLunarThread = mLunarView.getThread();
+
+        // get handles for lunar buttons
+        controlButton = findViewById(R.id.controlButton);
+        leftButton = findViewById(R.id.leftButton);
+        rightButton = findViewById(R.id.rightButton);
+        engineButton = findViewById(R.id.engineButton);
+
+        // register for touch listeners
+        controlButton.setOnTouchListener(new InputEventTouchListener(LunarView.LunarInputEvent.CONTROL));
+        leftButton.setOnTouchListener(new InputEventTouchListener(LunarView.LunarInputEvent.LEFT));
+        rightButton.setOnTouchListener(new InputEventTouchListener(LunarView.LunarInputEvent.RIGHT));
+        engineButton.setOnTouchListener(new InputEventTouchListener(LunarView.LunarInputEvent.ENGINE));
 
         // give the LunarView a handle to the TextView used for messages
         mLunarView.setTextView((TextView) findViewById(R.id.text));
-
 
         if (savedInstanceState == null) {
             // we were just launched: set up a new game
@@ -166,5 +195,27 @@ public class LunarLander extends Activity {
         super.onSaveInstanceState(outState);
         mLunarThread.saveState(outState);
         Log.w(this.getClass().getName(), "SIS called");
+    }
+
+    private class InputEventTouchListener implements View.OnTouchListener {
+
+        private final LunarView.LunarInputEvent event;
+
+        private InputEventTouchListener(LunarView.LunarInputEvent event) {
+            this.event = event;
+        }
+
+        @Override
+        public boolean onTouch(View view, MotionEvent motionEvent) {
+            switch (motionEvent.getAction()) {
+                case MotionEvent.ACTION_DOWN:
+                    mLunarView.onInputEventDown(event);
+                    return true;
+                case MotionEvent.ACTION_UP:
+                    mLunarView.onInputEventUp(event);
+                    return true;
+            }
+            return false;
+        }
     }
 }

@@ -6,7 +6,8 @@ android {
 
     defaultConfig {
         applicationId "com.example.android.lunarlander"
-        targetSdkVersion 17
+        targetSdkVersion 26
+        minSdkVersion 21
 
         testApplicationId "com.example.android.lunarlander.tests"
         testInstrumentationRunner "android.test.InstrumentationTestRunner"

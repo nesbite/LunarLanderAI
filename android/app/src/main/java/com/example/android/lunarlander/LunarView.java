@@ -16,7 +16,6 @@
 
 package com.example.android.lunarlander;
 
-import android.app.Instrumentation;
 import android.content.Context;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
@@ -39,7 +38,6 @@ import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttCallback;
 import org.eclipse.paho.client.mqttv3.MqttClient;
 import org.eclipse.paho.client.mqttv3.MqttConnectOptions;
-import org.eclipse.paho.client.mqttv3.MqttDeliveryToken;
 import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.MqttTopic;
@@ -59,6 +57,23 @@ import java.util.Map;
  * by the system.
  */
 class LunarView extends SurfaceView implements SurfaceHolder.Callback {
+    enum LunarInputEvent {
+        CONTROL(KeyEvent.KEYCODE_DPAD_UP),
+        LEFT(KeyEvent.KEYCODE_DPAD_LEFT),
+        RIGHT(KeyEvent.KEYCODE_DPAD_RIGHT),
+        ENGINE(KeyEvent.KEYCODE_DPAD_CENTER);
+
+        LunarInputEvent(int keyEvent) {
+            this.keyEvent = keyEvent;
+        }
+
+        private final int keyEvent;
+
+        public int getKeyEvent() {
+            return keyEvent;
+        }
+    }
+
     class LunarThread extends Thread {
         /*
          * Difficulty setting constants
@@ -683,7 +698,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * @param msg     the original event object
          * @return true
          */
-        boolean doKeyDown(int keyCode, KeyEvent msg) {
+        boolean doKeyDown(int keyCode) {
             synchronized (mSurfaceHolder) {
                 boolean okStart = false;
                 if (keyCode == KeyEvent.KEYCODE_DPAD_UP) okStart = true;
@@ -733,7 +748,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * @param msg     the original event object
          * @return true if the key was handled and consumed, or else false
          */
-        boolean doKeyUp(int keyCode, KeyEvent msg) {
+        boolean doKeyUp(int keyCode) {
             boolean handled = false;
 
             synchronized (mSurfaceHolder) {
@@ -955,8 +970,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                 mStatusText.setText(m.getData().getString("text"));
             }
         });
-
-        setFocusable(true); // make sure we get key events
     }
 
     /**
@@ -968,23 +981,12 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         return thread;
     }
 
-    /**
-     * Standard override to get key-press events.
-     */
-    @Override
-    public boolean onKeyDown(int keyCode, KeyEvent msg) {
-        System.out.println(keyCode);
-        return thread.doKeyDown(keyCode, msg);
+    public void onInputEventDown(LunarInputEvent event) {
+        thread.doKeyDown(event.getKeyEvent());
     }
 
-    /**
-     * Standard override for key-up. We actually care about these, so we can
-     * turn off the engine or stop rotating.
-     */
-    @Override
-    public boolean onKeyUp(int keyCode, KeyEvent msg) {
-        System.out.println(keyCode);
-        return thread.doKeyUp(keyCode, msg);
+    public void onInputEventUp(LunarInputEvent event) {
+        thread.doKeyUp(event.getKeyEvent());
     }
 
     /**
