@@ -25,6 +25,6 @@ client = mqtt.Client("LunarLanderAI")
 client.on_connect = on_connect
 client.on_message = on_message
 
-client.connect("localhost", port=1883, keepalive=60)
+client.connect("iot.eclipse.org", port=1883, keepalive=60)
 
 client.loop_forever()

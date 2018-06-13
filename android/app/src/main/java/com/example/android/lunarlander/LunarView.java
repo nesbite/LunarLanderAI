@@ -57,6 +57,7 @@ import java.util.Map;
  * by the system.
  */
 class LunarView extends SurfaceView implements SurfaceHolder.Callback {
+
     enum LunarInputEvent {
         CONTROL(KeyEvent.KEYCODE_DPAD_UP),
         LEFT(KeyEvent.KEYCODE_DPAD_LEFT),
@@ -105,11 +106,11 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         /*
          * Goal condition constants
          */
-        public static final int TARGET_ANGLE = 18; // > this angle means crash
+        public static final int TARGET_ANGLE = 25; // > this angle means crash
         public static final int TARGET_BOTTOM_PADDING = 17; // px below gear
         public static final int TARGET_PAD_HEIGHT = 8; // how high above ground
-        public static final int TARGET_SPEED = 28; // > this speed means crash
-        public static final double TARGET_WIDTH = 1.6; // width of target
+        public static final int TARGET_SPEED = 100; // > this speed means crash
+        public static final double TARGET_WIDTH = 5; // width of target
         /*
          * UI constants (i.e. the speed & fuel bars)
          */
@@ -212,7 +213,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         private int mGoalX;
 
         /**
-         * Message handler used by thread to interact with TextView
+         * Message handler used by lunarThread to interact with TextView
          */
         private Handler mHandler;
 
@@ -292,11 +293,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          */
         private double mY;
 
-        private MqttClient mqttClient;
-        private MqttTopic mqttTopic;
-        private String pub_topic = "DATA_FROM_ANDROID";
-        private String sub_topic = "DATA_FROM_AI";
-
         public LunarThread(SurfaceHolder surfaceHolder, Context context,
                            Handler handler) {
             // get handles to some important objects
@@ -344,81 +340,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
             mDY = 0;
             mHeading = 0;
             mEngineFiring = true;
-
-
-            String broker = "tcp://192.168.2.101:1883";
-            String clientId = "AndroidLunarLander";
-
-            try {
-                MemoryPersistence persistence = new MemoryPersistence();
-                mqttClient = new MqttClient(broker, clientId, persistence);
-                MqttConnectOptions connOpts = new MqttConnectOptions();
-                connOpts.setCleanSession(true);
-                System.out.println("Connecting to broker: " + broker);
-                mqttClient.connect(connOpts);
-                System.out.println("Connected");
-                mqttClient.subscribe(sub_topic);
-
-                mqttTopic = mqttClient.getTopic(pub_topic);
-                mqttClient.setCallback(new MqttCallback() {
-                    @Override
-                    public void connectionLost(Throwable cause) {
-                        System.out.println("Connection lost");
-                    }
-
-                    @Override
-                    public void messageArrived(String topic, MqttMessage message) throws Exception {
-                        System.out.println("Message arrived: " + message + ", topic:" + topic);
-                        int keyCode = Integer.parseInt(message.toString());
-
-                        if (mMode == STATE_RUNNING) {
-                            dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_DOWN, keyCode));
-                            Thread.sleep(100);
-                            dispatchKeyEvent(new KeyEvent(KeyEvent.ACTION_UP, keyCode));
-
-                            publishCurrentGameState();
-                        }
-                    }
-
-                    @Override
-                    public void deliveryComplete(IMqttDeliveryToken token) {
-                        System.out.println("Delivery complete");
-                    }
-                });
-
-            } catch (MqttException me) {
-                System.out.println("reason " + me.getReasonCode());
-                System.out.println("msg " + me.getMessage());
-                System.out.println("loc " + me.getLocalizedMessage());
-                System.out.println("cause " + me.getCause());
-                System.out.println("excep " + me);
-                me.printStackTrace();
-            }
-        }
-
-        private void publishCurrentGameState() throws MqttException {
-
-            Map<String, Object> map = new HashMap<>();
-
-            map.put(KEY_DIFFICULTY, mDifficulty);
-            map.put(KEY_X, mX);
-            map.put(KEY_Y, mY);
-            map.put(KEY_DX, mDX);
-            map.put(KEY_DY, mDY);
-            map.put(KEY_HEADING, mHeading);
-            map.put(KEY_LANDER_WIDTH, mLanderWidth);
-            map.put(KEY_LANDER_HEIGHT, mLanderHeight);
-            map.put(KEY_GOAL_X, mGoalX);
-            map.put(KEY_GOAL_SPEED, mGoalSpeed);
-            map.put(KEY_GOAL_ANGLE, mGoalAngle);
-            map.put(KEY_GOAL_WIDTH, mGoalWidth);
-            map.put(KEY_WINS, mWinsInARow);
-            map.put(KEY_FUEL, mFuel);
-
-            MqttMessage androidMessage = new MqttMessage(map.toString().getBytes());
-            androidMessage.setQos(2);
-            mqttTopic.publish(androidMessage);
-            System.out.println("Message published");
         }
 
         /**
@@ -580,8 +501,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         }
 
         /**
-         * Used to signal the thread whether it should be running or not.
-         * Passing true allows the thread to run; passing false will shut it
+         * Used to signal the lunarThread whether it should be running or not.
+         * Passing true allows the lunarThread to run; passing false will shut it
          * down if it's already running. Calling start() after this was most
          * recently called with false will result in an immediate shutdown.
          *
@@ -616,9 +537,9 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
              * This method optionally can cause a text message to be displayed
              * to the user when the mode changes. Since the View that actually
              * renders that text is part of the main View hierarchy and not
-             * owned by this thread, we can't touch the state of that View.
+             * owned by this lunarThread, we can't touch the state of that View.
              * Instead we use a Message + Handler to relay commands to the main
-             * thread, which updates the user-text View.
+             * lunarThread, which updates the user-text View.
              */
             synchronized (mSurfaceHolder) {
                 mMode = mode;
@@ -631,7 +552,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                     msg.setData(b);
                     mHandler.sendMessage(msg);
                     try {
-                        publishCurrentGameState();
+                        mqttThread.publishCurrentGameState();
                     } catch (MqttException e) {
                         e.printStackTrace();
                     }
@@ -777,6 +698,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         private void doDraw(Canvas canvas) {
             // Draw the background image. Operations on the Canvas accumulate
             // so this is like clearing the screen.
+            if (canvas == null) return;
+
             canvas.drawBitmap(mBackgroundImage, 0, 0, null);
 
             int yTop = mCanvasHeight - ((int) mY + mLanderHeight / 2);
@@ -940,6 +863,96 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         }
     }
 
+    class MqttThread extends Thread {
+        private static final String BROKER = "tcp://iot.eclipse.org:1883";
+        private static final String CLIENT_ID = "AndroidLunarLander";
+
+        private MqttClient mqttClient;
+        private MqttTopic mqttTopic;
+        private String pub_topic = "DATA_FROM_ANDROID";
+        private String sub_topic = "DATA_FROM_AI";
+
+        @Override
+        public void run() {
+
+            try {
+                MemoryPersistence persistence = new MemoryPersistence();
+                mqttClient = new MqttClient(BROKER, CLIENT_ID, persistence);
+                MqttConnectOptions connOpts = new MqttConnectOptions();
+                connOpts.setCleanSession(true);
+                System.out.println("Connecting to broker: " + BROKER);
+                mqttClient.connect(connOpts);
+                System.out.println("Connected");
+                mqttClient.subscribe(sub_topic);
+
+                mqttTopic = mqttClient.getTopic(pub_topic);
+                mqttClient.setCallback(new DefaultMqttCallback());
+
+            } catch (MqttException me) {
+                System.out.println("reason " + me.getReasonCode());
+                System.out.println("msg " + me.getMessage());
+                System.out.println("loc " + me.getLocalizedMessage());
+                System.out.println("cause " + me.getCause());
+                System.out.println("excep " + me);
+                me.printStackTrace();
+            }
+        }
+
+        class DefaultMqttCallback implements MqttCallback {
+
+            @Override
+            public void connectionLost(Throwable cause) {
+                System.out.println("Connection lost");
+            }
+
+            @Override
+            public void messageArrived(String topic, MqttMessage message) throws Exception {
+                System.out.println("Message arrived: " + message + ", topic:" + topic);
+                int keyCode = Integer.parseInt(message.toString());
+
+                if (lunarThread.mMode == LunarThread.STATE_RUNNING) {
+                    lunarThread.doKeyDown(keyCode);
+                    Thread.sleep(100);
+                    lunarThread.doKeyUp(keyCode);
+
+                    publishCurrentGameState();
+                }
+            }
+
+            @Override
+            public void deliveryComplete(IMqttDeliveryToken token) {
+                System.out.println("Delivery complete");
+            }
+        }
+
+        private void publishCurrentGameState() throws MqttException {
+            Map<String, Object> map = new HashMap<>();
+
+            map.put(LunarThread.KEY_DIFFICULTY, lunarThread.mDifficulty);
+            map.put(LunarThread.KEY_X, lunarThread.mX);
+            map.put(LunarThread.KEY_Y, lunarThread.mY);
+            map.put(LunarThread.KEY_DX, lunarThread.mDX);
+            map.put(LunarThread.KEY_DY, lunarThread.mDY);
+            map.put(LunarThread.KEY_HEADING, lunarThread.mHeading);
+            map.put(LunarThread.KEY_LANDER_WIDTH, lunarThread.mLanderWidth);
+            map.put(LunarThread.KEY_LANDER_HEIGHT, lunarThread.mLanderHeight);
+            map.put(LunarThread.KEY_GOAL_X, lunarThread.mGoalX);
+            map.put(LunarThread.KEY_GOAL_SPEED, lunarThread.mGoalSpeed);
+            map.put(LunarThread.KEY_GOAL_ANGLE, lunarThread.mGoalAngle);
+            map.put(LunarThread.KEY_GOAL_WIDTH, lunarThread.mGoalWidth);
+            map.put(LunarThread.KEY_WINS, lunarThread.mWinsInARow);
+            map.put(LunarThread.KEY_FUEL, lunarThread.mFuel);
+
+            MqttMessage androidMessage = new MqttMessage(map.toString().getBytes());
+            androidMessage.setQos(2);
+
+            if (mqttTopic != null) {
+                mqttTopic.publish(androidMessage);
+                System.out.println("Message published");
+            }
+        }
+    }
+
     /**
      * Handle to the application context, used to e.g. fetch Drawables.
      */
@@ -951,9 +964,11 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
     private TextView mStatusText;
 
     /**
-     * The thread that actually draws the animation
+     * The lunarThread that actually draws the animation
      */
-    private LunarThread thread;
+    private LunarThread lunarThread;
+
+    private MqttThread mqttThread;
 
     public LunarView(Context context, AttributeSet attrs) {
         super(context, attrs);
@@ -962,31 +977,33 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         SurfaceHolder holder = getHolder();
         holder.addCallback(this);
 
-        // create thread only; it's started in surfaceCreated()
-        thread = new LunarThread(holder, context, new Handler() {
+        // create lunarThread only; it's started in surfaceCreated()
+        lunarThread = new LunarThread(holder, context, new Handler() {
             @Override
             public void handleMessage(Message m) {
                 mStatusText.setVisibility(m.getData().getInt("viz"));
                 mStatusText.setText(m.getData().getString("text"));
             }
         });
+
+        mqttThread = new MqttThread();
     }
 
     /**
-     * Fetches the animation thread corresponding to this LunarView.
+     * Fetches the animation lunarThread corresponding to this LunarView.
      *
-     * @return the animation thread
+     * @return the animation lunarThread
      */
     public LunarThread getThread() {
-        return thread;
+        return lunarThread;
     }
 
     public void onInputEventDown(LunarInputEvent event) {
-        thread.doKeyDown(event.getKeyEvent());
+        lunarThread.doKeyDown(event.getKeyEvent());
     }
 
     public void onInputEventUp(LunarInputEvent event) {
-        thread.doKeyUp(event.getKeyEvent());
+        lunarThread.doKeyUp(event.getKeyEvent());
     }
 
     /**
@@ -995,7 +1012,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
      */
     @Override
     public void onWindowFocusChanged(boolean hasWindowFocus) {
-        if (!hasWindowFocus) thread.pause();
+        if (!hasWindowFocus) lunarThread.pause();
     }
 
     /**
@@ -1008,7 +1025,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
     /* Callback invoked when the surface dimensions change. */
     public void surfaceChanged(SurfaceHolder holder, int format, int width,
                                int height) {
-        thread.setSurfaceSize(width, height);
+        lunarThread.setSurfaceSize(width, height);
     }
 
     /*
@@ -1016,10 +1033,12 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
      * used.
      */
     public void surfaceCreated(SurfaceHolder holder) {
-        // start the thread here so that we don't busy-wait in run()
+        // start the lunarThread here so that we don't busy-wait in run()
         // waiting for the surface to be created
-        thread.setRunning(true);
-        thread.start();
+        lunarThread.setRunning(true);
+        lunarThread.start();
+
+        mqttThread.start();
     }
 
     /*
@@ -1028,13 +1047,14 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
      * never be touched again!
      */
     public void surfaceDestroyed(SurfaceHolder holder) {
-        // we have to tell thread to shut down & wait for it to finish, or else
+        // we have to tell lunarThread to shut down & wait for it to finish, or else
         // it might touch the Surface after we return and explode
         boolean retry = true;
-        thread.setRunning(false);
+        lunarThread.setRunning(false);
+        mqttThread.interrupt();
         while (retry) {
             try {
-                thread.join();
+                lunarThread.join();
                 retry = false;
             } catch (InterruptedException e) {
             }
