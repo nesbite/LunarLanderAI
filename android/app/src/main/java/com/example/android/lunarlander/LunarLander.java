@@ -107,7 +107,7 @@ public class LunarLander extends Activity {
                 mLunarThread.doStart();
                 return true;
             case MENU_STOP:
-                mLunarThread.setState(LunarThread.STATE_LOSE,
+                mLunarThread.setState(LunarState.STATE_LOSE,
                         getText(R.string.message_stopped));
                 return true;
             case MENU_PAUSE:
@@ -165,7 +165,7 @@ public class LunarLander extends Activity {
 
         if (savedInstanceState == null) {
             // we were just launched: set up a new game
-            mLunarThread.setState(LunarThread.STATE_READY);
+            mLunarThread.setState(LunarState.STATE_READY);
             Log.w(this.getClass().getName(), "SIS is null");
         } else {
             // we are being restored: resume a previous game
