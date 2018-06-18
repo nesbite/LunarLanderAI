@@ -28,6 +28,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -42,9 +43,10 @@ import org.eclipse.paho.client.mqttv3.MqttException;
 import org.eclipse.paho.client.mqttv3.MqttMessage;
 import org.eclipse.paho.client.mqttv3.MqttTopic;
 import org.eclipse.paho.client.mqttv3.persist.MemoryPersistence;
+import org.json.JSONObject;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.util.concurrent.BrokenBarrierException;
+import java.util.concurrent.CyclicBarrier;
 
 
 /**
@@ -58,17 +60,129 @@ import java.util.Map;
  */
 class LunarView extends SurfaceView implements SurfaceHolder.Callback {
 
+    private static final String TAG = LunarView.class.getSimpleName();
+    private static final String MQTT_HOST = "192.168.1.14";
+    /**
+     * Handle to the application context, used to e.g. fetch Drawables.
+     */
+    private Context mContext;
+    /**
+     * Pointer to the text view to display "Paused.." etc.
+     */
+    private TextView mStatusText;
+    /**
+     * The lunarThread that actually draws the animation
+     */
+    private LunarThread lunarThread;
+    private MqttThread mqttThread;
+    private CyclicBarrier mqttBarrier;
+    private CyclicBarrier drawBarrier;
+
+    public LunarView(Context context, AttributeSet attrs) {
+        super(context, attrs);
+
+        // register our interest in hearing about changes to our surface
+        SurfaceHolder holder = getHolder();
+        holder.addCallback(this);
+
+        // create lunarThread only; it's started in surfaceCreated()
+        lunarThread = new LunarThread(holder, context, new Handler() {
+            @Override
+            public void handleMessage(Message m) {
+                mStatusText.setVisibility(m.getData().getInt("viz"));
+                mStatusText.setText(m.getData().getString("text"));
+            }
+        });
+
+        mqttThread = new MqttThread();
+
+        mqttBarrier = new CyclicBarrier(2);
+        drawBarrier = new CyclicBarrier(2);
+    }
+
+    /**
+     * Fetches the animation lunarThread corresponding to this LunarView.
+     *
+     * @return the animation lunarThread
+     */
+    public LunarThread getThread() {
+        return lunarThread;
+    }
+
+    public void onInputEventDown(LunarInputEvent event) {
+        lunarThread.doKeyDown(event.getKeyEvent());
+    }
+
+    public void onInputEventUp(LunarInputEvent event) {
+        lunarThread.doKeyUp(event.getKeyEvent());
+    }
+
+    /**
+     * Standard window-focus override. Notice focus lost so we can pause on
+     * focus lost. e.g. user switches to take a call.
+     */
+    @Override
+    public void onWindowFocusChanged(boolean hasWindowFocus) {
+        if (!hasWindowFocus) lunarThread.pause();
+    }
+
+    /**
+     * Installs a pointer to the text view used for messages.
+     */
+    public void setTextView(TextView textView) {
+        mStatusText = textView;
+    }
+
+    /* Callback invoked when the surface dimensions change. */
+    public void surfaceChanged(SurfaceHolder holder, int format, int width,
+                               int height) {
+        lunarThread.setSurfaceSize(width, height);
+    }
+
+    /*
+     * Callback invoked when the Surface has been created and is ready to be
+     * used.
+     */
+    public void surfaceCreated(SurfaceHolder holder) {
+        // start the lunarThread here so that we don't busy-wait in run()
+        // waiting for the surface to be created
+        lunarThread.setRunning(true);
+        lunarThread.start();
+
+        mqttThread.start();
+    }
+
+    /*
+     * Callback invoked when the Surface has been destroyed and must no longer
+     * be touched. WARNING: after this method returns, the Surface/Canvas must
+     * never be touched again!
+     */
+    public void surfaceDestroyed(SurfaceHolder holder) {
+        // we have to tell lunarThread to shut down & wait for it to finish, or else
+        // it might touch the Surface after we return and explode
+        boolean retry = true;
+        lunarThread.setRunning(false);
+        mqttThread.interrupt();
+        while (retry) {
+            try {
+                lunarThread.join();
+                retry = false;
+            } catch (InterruptedException e) {
+            }
+        }
+    }
+
     enum LunarInputEvent {
         CONTROL(KeyEvent.KEYCODE_DPAD_UP),
         LEFT(KeyEvent.KEYCODE_DPAD_LEFT),
         RIGHT(KeyEvent.KEYCODE_DPAD_RIGHT),
         ENGINE(KeyEvent.KEYCODE_DPAD_CENTER);
 
+        private final int keyEvent;
+
         LunarInputEvent(int keyEvent) {
             this.keyEvent = keyEvent;
         }
-
-        private final int keyEvent;
 
         public int getKeyEvent() {
             return keyEvent;
@@ -293,6 +407,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          */
         private double mY;
 
+        private boolean alreadyDrawn = false;
+
         public LunarThread(SurfaceHolder surfaceHolder, Context context,
                            Handler handler) {
             // get handles to some important objects
@@ -434,12 +550,29 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         public void run() {
             while (mRun) {
                 Canvas c = null;
+
+                // make a synchronization between threads only if there is something on the screen
                 try {
+                    if (alreadyDrawn) {
+                        Log.i(TAG, "Waiting for mqttBarrier to update canvas");
+                        mqttBarrier.await();
+                    }
+
                     c = mSurfaceHolder.lockCanvas(null);
                     synchronized (mSurfaceHolder) {
                         if (mMode == STATE_RUNNING) updatePhysics();
                         doDraw(c);
                     }
+
+                    if (alreadyDrawn) {
+                        drawBarrier.await();
+                    } else {
+                        alreadyDrawn = true;
+                    }
+                } catch (InterruptedException | BrokenBarrierException e) {
+                    mqttBarrier.reset();
+                    drawBarrier.reset();
+                    e.printStackTrace();
                 } finally {
                     // do this in a finally so that if an exception is thrown
                     // during the above, we don't leave the Surface in an
@@ -551,11 +684,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                     b.putInt("viz", View.INVISIBLE);
                     msg.setData(b);
                     mHandler.sendMessage(msg);
-                    try {
-                        mqttThread.publishCurrentGameState();
-                    } catch (MqttException e) {
-                        e.printStackTrace();
-                    }
                 } else {
                     mRotating = 0;
                     mEngineFiring = false;
@@ -616,7 +744,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Handles a key-down event.
          *
          * @param keyCode the key that was pressed
-         * @param msg     the original event object
          * @return true
          */
         boolean doKeyDown(int keyCode) {
@@ -666,7 +793,6 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Handles a key-up event.
          *
          * @param keyCode the key that was pressed
-         * @param msg     the original event object
          * @return true if the key was handled and consumed, or else false
          */
         boolean doKeyUp(int keyCode) {
@@ -864,7 +990,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
     }
 
     class MqttThread extends Thread {
-        private static final String BROKER = "tcp://iot.eclipse.org:1883";
+        private static final String BROKER = "tcp://" + MQTT_HOST + ":1883";
         private static final String CLIENT_ID = "AndroidLunarLander";
 
         private MqttClient mqttClient;
@@ -898,6 +1024,33 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
             }
         }
 
+        private void publishCurrentGameState() throws Exception {
+            JSONObject json = new JSONObject()
+                    .put("done", lunarThread.mMode != LunarThread.STATE_RUNNING)
+                    .put(LunarThread.KEY_DIFFICULTY, lunarThread.mDifficulty)
+                    .put(LunarThread.KEY_X, lunarThread.mX)
+                    .put(LunarThread.KEY_Y, lunarThread.mY)
+                    .put(LunarThread.KEY_DX, lunarThread.mDX)
+                    .put(LunarThread.KEY_DY, lunarThread.mDY)
+                    .put(LunarThread.KEY_HEADING, lunarThread.mHeading)
+                    .put(LunarThread.KEY_LANDER_WIDTH, lunarThread.mLanderWidth)
+                    .put(LunarThread.KEY_LANDER_HEIGHT, lunarThread.mLanderHeight)
+                    .put(LunarThread.KEY_GOAL_X, lunarThread.mGoalX)
+                    .put(LunarThread.KEY_GOAL_SPEED, lunarThread.mGoalSpeed)
+                    .put(LunarThread.KEY_GOAL_ANGLE, lunarThread.mGoalAngle)
+                    .put(LunarThread.KEY_GOAL_WIDTH, lunarThread.mGoalWidth)
+                    .put(LunarThread.KEY_WINS, lunarThread.mWinsInARow)
+                    .put(LunarThread.KEY_FUEL, lunarThread.mFuel);
+
+            MqttMessage gameStateMessage = new MqttMessage(json.toString().getBytes());
+            gameStateMessage.setQos(2);
+
+            if (mqttTopic != null) {
+                mqttTopic.publish(gameStateMessage);
+                System.out.println("Message published");
+            }
+        }
+
         class DefaultMqttCallback implements MqttCallback {
 
             @Override
@@ -908,155 +1061,30 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
             @Override
             public void messageArrived(String topic, MqttMessage message) throws Exception {
                 System.out.println("Message arrived: " + message + ", topic:" + topic);
-                int keyCode = Integer.parseInt(message.toString());
 
-                if (lunarThread.mMode == LunarThread.STATE_RUNNING) {
-                    lunarThread.doKeyDown(keyCode);
-                    Thread.sleep(100);
-                    lunarThread.doKeyUp(keyCode);
+                JSONObject json = new JSONObject(message.toString());
+                String type = json.optString("type");
+                switch (type) {
+                    case "reset":
+                        lunarThread.doStart();
+                        break;
+                    case "step":
+                        int action = json.optInt("action");
+                        lunarThread.doKeyDown(action);
+                        mqttBarrier.await();
 
-                    publishCurrentGameState();
+                        Log.i(TAG, "Waiting for drawBarrier to publish game state...");
+                        drawBarrier.await();
+                        lunarThread.doKeyUp(action);
                 }
+
+                Log.i(TAG, "Publishing message to server side");
+                publishCurrentGameState();
             }
 
             @Override
             public void deliveryComplete(IMqttDeliveryToken token) {
                 System.out.println("Delivery complete");
-            }
-        }
-
-        private void publishCurrentGameState() throws MqttException {
-            Map<String, Object> map = new HashMap<>();
-
-            map.put(LunarThread.KEY_DIFFICULTY, lunarThread.mDifficulty);
-            map.put(LunarThread.KEY_X, lunarThread.mX);
-            map.put(LunarThread.KEY_Y, lunarThread.mY);
-            map.put(LunarThread.KEY_DX, lunarThread.mDX);
-            map.put(LunarThread.KEY_DY, lunarThread.mDY);
-            map.put(LunarThread.KEY_HEADING, lunarThread.mHeading);
-            map.put(LunarThread.KEY_LANDER_WIDTH, lunarThread.mLanderWidth);
-            map.put(LunarThread.KEY_LANDER_HEIGHT, lunarThread.mLanderHeight);
-            map.put(LunarThread.KEY_GOAL_X, lunarThread.mGoalX);
-            map.put(LunarThread.KEY_GOAL_SPEED, lunarThread.mGoalSpeed);
-            map.put(LunarThread.KEY_GOAL_ANGLE, lunarThread.mGoalAngle);
-            map.put(LunarThread.KEY_GOAL_WIDTH, lunarThread.mGoalWidth);
-            map.put(LunarThread.KEY_WINS, lunarThread.mWinsInARow);
-            map.put(LunarThread.KEY_FUEL, lunarThread.mFuel);
-
-            MqttMessage androidMessage = new MqttMessage(map.toString().getBytes());
-            androidMessage.setQos(2);
-
-            if (mqttTopic != null) {
-                mqttTopic.publish(androidMessage);
-                System.out.println("Message published");
-            }
-        }
-    }
-
-    /**
-     * Handle to the application context, used to e.g. fetch Drawables.
-     */
-    private Context mContext;
-
-    /**
-     * Pointer to the text view to display "Paused.." etc.
-     */
-    private TextView mStatusText;
-
-    /**
-     * The lunarThread that actually draws the animation
-     */
-    private LunarThread lunarThread;
-
-    private MqttThread mqttThread;
-
-    public LunarView(Context context, AttributeSet attrs) {
-        super(context, attrs);
-
-        // register our interest in hearing about changes to our surface
-        SurfaceHolder holder = getHolder();
-        holder.addCallback(this);
-
-        // create lunarThread only; it's started in surfaceCreated()
-        lunarThread = new LunarThread(holder, context, new Handler() {
-            @Override
-            public void handleMessage(Message m) {
-                mStatusText.setVisibility(m.getData().getInt("viz"));
-                mStatusText.setText(m.getData().getString("text"));
-            }
-        });
-
-        mqttThread = new MqttThread();
-    }
-
-    /**
-     * Fetches the animation lunarThread corresponding to this LunarView.
-     *
-     * @return the animation lunarThread
-     */
-    public LunarThread getThread() {
-        return lunarThread;
-    }
-
-    public void onInputEventDown(LunarInputEvent event) {
-        lunarThread.doKeyDown(event.getKeyEvent());
-    }
-
-    public void onInputEventUp(LunarInputEvent event) {
-        lunarThread.doKeyUp(event.getKeyEvent());
-    }
-
-    /**
-     * Standard window-focus override. Notice focus lost so we can pause on
-     * focus lost. e.g. user switches to take a call.
-     */
-    @Override
-    public void onWindowFocusChanged(boolean hasWindowFocus) {
-        if (!hasWindowFocus) lunarThread.pause();
-    }
-
-    /**
-     * Installs a pointer to the text view used for messages.
-     */
-    public void setTextView(TextView textView) {
-        mStatusText = textView;
-    }
-
-    /* Callback invoked when the surface dimensions change. */
-    public void surfaceChanged(SurfaceHolder holder, int format, int width,
-                               int height) {
-        lunarThread.setSurfaceSize(width, height);
-    }
-
-    /*
-     * Callback invoked when the Surface has been created and is ready to be
-     * used.
-     */
-    public void surfaceCreated(SurfaceHolder holder) {
-        // start the lunarThread here so that we don't busy-wait in run()
-        // waiting for the surface to be created
-        lunarThread.setRunning(true);
-        lunarThread.start();
-
-        mqttThread.start();
-    }
-
-    /*
-     * Callback invoked when the Surface has been destroyed and must no longer
-     * be touched. WARNING: after this method returns, the Surface/Canvas must
-     * never be touched again!
-     */
-    public void surfaceDestroyed(SurfaceHolder holder) {
-        // we have to tell lunarThread to shut down & wait for it to finish, or else
-        // it might touch the Surface after we return and explode
-        boolean retry = true;
-        lunarThread.setRunning(false);
-        mqttThread.interrupt();
-        while (retry) {
-            try {
-                lunarThread.join();
-                retry = false;
-            } catch (InterruptedException e) {
             }
         }
     }
