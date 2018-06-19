@@ -895,7 +895,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
             // by 100ms or whatever.
             if (mLastTime > now) return;
 
-            double elapsed = (now - mLastTime) / 1000.0;
+//            double elapsed = (now - mLastTime) / 1000.0;
+            double elapsed = 0.2; // TODO don't do this at home
 
             // mRotating -- update heading
             if (mRotating != 0) {
@@ -1025,24 +1026,18 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         }
 
         private void publishCurrentGameState() throws Exception {
-            JSONObject json = new JSONObject()
-                    .put("done", lunarThread.mMode != LunarThread.STATE_RUNNING)
-                    .put(LunarThread.KEY_DIFFICULTY, lunarThread.mDifficulty)
+            JSONObject lunarState = new JSONObject()
                     .put(LunarThread.KEY_X, lunarThread.mX)
                     .put(LunarThread.KEY_Y, lunarThread.mY)
-                    .put(LunarThread.KEY_DX, lunarThread.mDX)
                     .put(LunarThread.KEY_DY, lunarThread.mDY)
-                    .put(LunarThread.KEY_HEADING, lunarThread.mHeading)
-                    .put(LunarThread.KEY_LANDER_WIDTH, lunarThread.mLanderWidth)
-                    .put(LunarThread.KEY_LANDER_HEIGHT, lunarThread.mLanderHeight)
-                    .put(LunarThread.KEY_GOAL_X, lunarThread.mGoalX)
-                    .put(LunarThread.KEY_GOAL_SPEED, lunarThread.mGoalSpeed)
-                    .put(LunarThread.KEY_GOAL_ANGLE, lunarThread.mGoalAngle)
-                    .put(LunarThread.KEY_GOAL_WIDTH, lunarThread.mGoalWidth)
-                    .put(LunarThread.KEY_WINS, lunarThread.mWinsInARow)
-                    .put(LunarThread.KEY_FUEL, lunarThread.mFuel);
+                    .put(LunarThread.KEY_HEADING, lunarThread.mHeading);
 
-            MqttMessage gameStateMessage = new MqttMessage(json.toString().getBytes());
+            JSONObject jsonMsg = new JSONObject()
+                    .put("done", lunarThread.mMode != LunarThread.STATE_RUNNING)
+                    .put("reward", lunarThread.mMode == LunarThread.STATE_WIN)
+                    .put("state", lunarState);
+
+            MqttMessage gameStateMessage = new MqttMessage(jsonMsg.toString().getBytes());
             gameStateMessage.setQos(2);
 
             if (mqttTopic != null) {
