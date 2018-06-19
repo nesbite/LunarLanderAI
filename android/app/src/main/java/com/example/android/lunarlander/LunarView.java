@@ -28,11 +28,14 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
+import android.util.DisplayMetrics;
 import android.util.Log;
+import android.view.Display;
 import android.view.KeyEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
+import android.view.WindowManager;
 import android.widget.TextView;
 
 import org.eclipse.paho.client.mqttv3.IMqttDeliveryToken;
@@ -61,7 +64,7 @@ import java.util.concurrent.CyclicBarrier;
 class LunarView extends SurfaceView implements SurfaceHolder.Callback {
 
     private static final String TAG = LunarView.class.getSimpleName();
-    private static final String MQTT_HOST = "192.168.1.14";
+    private static final String MQTT_HOST = "192.168.1.2";
     /**
      * Handle to the application context, used to e.g. fetch Drawables.
      */
@@ -77,10 +80,17 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
     private MqttThread mqttThread;
     private CyclicBarrier mqttBarrier;
     private CyclicBarrier drawBarrier;
+    public int screenWidth;
+    public int screenHeight;
 
     public LunarView(Context context, AttributeSet attrs) {
         super(context, attrs);
-
+        WindowManager wm = (WindowManager) context.getSystemService(Context.WINDOW_SERVICE);
+        Display display = wm.getDefaultDisplay();
+        DisplayMetrics metrics = new DisplayMetrics();
+        display.getMetrics(metrics);
+        screenHeight = metrics.heightPixels;
+        screenWidth = metrics.widthPixels;
         // register our interest in hearing about changes to our surface
         SurfaceHolder holder = getHolder();
         holder.addCallback(this);
@@ -241,9 +251,11 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
 
         private static final String KEY_GOAL_X = "mGoalX";
         private static final String KEY_HEADING = "mHeading";
+        private static final String KEY_ROTATING = "mRotating";
         private static final String KEY_LANDER_HEIGHT = "mLanderHeight";
         private static final String KEY_LANDER_WIDTH = "mLanderWidth";
         private static final String KEY_WINS = "mWinsInARow";
+        private static final String KEY_ON_GOAL = "mOnGoal";
 
         private static final String KEY_X = "mX";
         private static final String KEY_Y = "mY";
@@ -305,7 +317,9 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Fuel remaining
          */
         private double mFuel;
-
+        public double getFuel(){
+            return mFuel;
+        }
         /**
          * Allowed angle.
          */
@@ -408,6 +422,8 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         private double mY;
 
         private boolean alreadyDrawn = false;
+
+        private boolean mOnGoal = false;
 
         public LunarThread(SurfaceHolder surfaceHolder, Context context,
                            Handler handler) {
@@ -888,6 +904,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
          * Detects the end-of-game and sets the UI to the next state.
          */
         private void updatePhysics() {
+            mOnGoal = false;
             long now = System.currentTimeMillis();
 
             // Do nothing if mLastTime is in the future.
@@ -963,6 +980,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                 double speed = Math.sqrt(mDX * mDX + mDY * mDY);
                 boolean onGoal = (mGoalX <= mX - mLanderWidth / 2 && mX
                         + mLanderWidth / 2 <= mGoalX + mGoalWidth);
+                mOnGoal = onGoal;
                 // "Hyperspace" win -- upside down, going fast,
                 // puts you back at the top.
                 if (onGoal && Math.abs(mHeading - 180) < mGoalAngle
@@ -998,6 +1016,9 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         private MqttTopic mqttTopic;
         private String pub_topic = "DATA_FROM_ANDROID";
         private String sub_topic = "DATA_FROM_AI";
+        private double prevFuelState = -1;
+        private double prevShaping = 0.0;
+        private boolean prevShapingExist = false;
 
         @Override
         public void run() {
@@ -1026,19 +1047,60 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         }
 
         private void publishCurrentGameState() throws Exception {
+            double fuelUsed = prevFuelState > 0 ? prevFuelState - lunarThread.getFuel() : 0;
+            prevFuelState = lunarThread.getFuel();
+            double mX = (lunarThread.mX - screenWidth / 2) / (screenWidth / 2);
+            double mY = lunarThread.mY / screenHeight;
+            double mDX = lunarThread.mDX * 0.2 / screenWidth;
+            double mDY = lunarThread.mDY * 0.2 / screenHeight;
+            double mHeading = lunarThread.mHeading * 0.0174532925;
+//            System.out.println("mX:" + mX);
+//            System.out.println("mY:" + mY);
+//            System.out.println("mDX:" + mDX);
+//            System.out.println("mDY:" + mDY);
+//            System.out.println("mHeading:" + mHeading);
+//            System.out.println("sqrtXY:" + Math.sqrt(Math.pow(mX, 2) + Math.pow(mY, 2)));
+//            System.out.println("sqrtDXDY:" + Math.sqrt(Math.pow(mDX, 2) + Math.pow(mDY, 2)));
             JSONObject lunarState = new JSONObject()
-                    .put(LunarThread.KEY_X, lunarThread.mX)
-                    .put(LunarThread.KEY_Y, lunarThread.mY)
-                    .put(LunarThread.KEY_DY, lunarThread.mDY)
-                    .put(LunarThread.KEY_HEADING, lunarThread.mHeading);
+                    .put(LunarThread.KEY_X, mX)
+                    .put(LunarThread.KEY_Y, mY)
+                    .put(LunarThread.KEY_DX, mDX)
+                    .put(LunarThread.KEY_DY, mDY)
+                    .put(LunarThread.KEY_HEADING, mHeading)
+                    .put(LunarThread.KEY_ON_GOAL, lunarThread.mOnGoal);
 
+            double reward = 0.0;
+            double shaping = -100 * Math.sqrt(Math.pow(mX, 2) + Math.pow(mY, 2))
+                    - 100 * Math.sqrt(Math.pow(mDX, 2) + Math.pow(mDY, 2))
+                    - 100 * Math.abs(mHeading > Math.PI ? 2*Math.PI - mHeading : mHeading) // transform degrees to radians
+                    + (lunarThread.mOnGoal ? 10 : 0) ;
+            if(prevShapingExist){
+                reward = shaping - prevShaping;
+            }
+//            System.out.println("shaping:" + shaping);
+//            System.out.println("prevShaping:" + prevShaping);
+
+            reward -= 0.3 * fuelUsed;
+//            System.out.println("fuelUsed: " + -0.3 * fuelUsed);
+            boolean done = lunarThread.mMode != LunarThread.STATE_RUNNING;
+
+            if(done){
+                if(lunarThread.mMode == LunarThread.STATE_WIN){
+                    reward = 300;
+                } else if(lunarThread.mMode == LunarThread.STATE_LOSE){
+                    reward = -150;
+                }
+            }
+//            System.out.println("reward: " + reward);
             JSONObject jsonMsg = new JSONObject()
-                    .put("done", lunarThread.mMode != LunarThread.STATE_RUNNING)
-                    .put("reward", lunarThread.mMode == LunarThread.STATE_WIN)
+                    .put("done", done)
+                    .put("reward", reward)
                     .put("state", lunarState);
 
             MqttMessage gameStateMessage = new MqttMessage(jsonMsg.toString().getBytes());
             gameStateMessage.setQos(2);
+            prevShaping = shaping;
+            prevShapingExist = true;
 
             if (mqttTopic != null) {
                 mqttTopic.publish(gameStateMessage);
@@ -1059,8 +1121,12 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
 
                 JSONObject json = new JSONObject(message.toString());
                 String type = json.optString("type");
+                System.out.println(json);
                 switch (type) {
                     case "reset":
+                        prevFuelState = -1;
+                        prevShaping = -1;
+                        prevShapingExist = false;
                         lunarThread.doStart();
                         break;
                     case "step":
