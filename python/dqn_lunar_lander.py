@@ -96,7 +96,6 @@ class LunarEnv:
         # return np.random.choice(len(KEY_EVENT_MAPPING), p=[0.3, 0.3, 0.1, 0.3])
 
 
-
 H1=256  
 H2=512
 BATCH_SIZE=512
@@ -109,6 +108,7 @@ REPLAY_SIZE=100000
 log_dir=os.path.abspath('./logs/test_1')
 save_dir=('logs/model')
 monitor_dir='logs/monitor'
+
 class DQN():
     def __init__(self):
         self.replay_buffer=deque()
@@ -208,10 +208,7 @@ class DQN():
                    self.state_input:state_batch,
                    self.keep_prob:keep_prob}
             summary,_=self.session.run([self.merged,self.optimizer],feed_dict)
-            
-
-        
-        
+                
         
     def save_network(self,direct):
         self.saver.save(self.session,direct)
@@ -246,51 +243,55 @@ class DQN():
                     self.replay_buffer.popleft()
             print('Episode: %d, reward: %f' % (episode, total_reward))
 
-
 EPISODE=1000000
 STEP = 1000
 TEST = 100
 
-lunar_env = LunarEnv()
-lunar_env.connect()
-env = lunar_env
-agent=DQN()
-agent.observ(env)
-#env=Monitor(env,monitor_dir,force=True)
-#agent.read_network(save_dir)
-sum_of_reward=0
+def main():
+    lunar_env = LunarEnv()
+    lunar_env.connect()
+    env = lunar_env
+    agent=DQN()
+    agent.observ(env)
+    #env=Monitor(env,monitor_dir,force=True)
+    #agent.read_network(save_dir)
+    sum_of_reward=0
 
-for episode in range(EPISODE):
-    state=env.reset()
-    if agent.epsilon>END_EPSILON:
-        agent.epsilon-=(INITIAL_EPSILON-END_EPSILON)/2000
-    elif agent.epsilon>END_EPSILON2:
-        agent.epsilon-=(END_EPSILON-END_EPSILON2)/3000
-    done = False
-    total_per_reward = 0
-    while not done:
-        action=agent.egreedy_action(state)
-        next_state,reward,done = env.step(action)
-        agent.perceive(state,action,reward,next_state,done)
-        state=next_state
-        total_per_reward += reward
-    sum_of_reward += total_per_reward
-    print("%.0f, %f" % (episode, total_per_reward))
-    if episode%100==0:
-        agent.save_network(save_dir)
-        print('average reward of last 100 episode:',sum_of_reward/100)
-        if sum_of_reward/100>200:
-            total_reward=0
-            for i in range(TEST):  
-                state=env.reset()
-                done = False
-                while not done:
-                    action=agent.action(state)
-                    state,reward,done=env.step(action)
-                    total_reward+=reward
-            ave_reward=total_reward/TEST    
-            print('episode: ',episode,"Avarge Reward:",ave_reward)
-            if ave_reward>=200:
-                #env.close()
-                break
-        sum_of_reward = 0
+    for episode in range(EPISODE):
+        state=env.reset()
+        if agent.epsilon>END_EPSILON:
+            agent.epsilon-=(INITIAL_EPSILON-END_EPSILON)/2000
+        elif agent.epsilon>END_EPSILON2:
+            agent.epsilon-=(END_EPSILON-END_EPSILON2)/3000
+        done = False
+        total_per_reward = 0
+        while not done:
+            action=agent.egreedy_action(state)
+            next_state,reward,done = env.step(action)
+            agent.perceive(state,action,reward,next_state,done)
+            state=next_state
+            total_per_reward += reward
+        sum_of_reward += total_per_reward
+        print("%.0f, %f" % (episode, total_per_reward))
+        if episode%100==0:
+            agent.save_network(save_dir)
+            print('average reward of last 100 episode:',sum_of_reward/100)
+            if sum_of_reward/100>200:
+                total_reward=0
+                for i in range(TEST):  
+                    state=env.reset()
+                    done = False
+                    while not done:
+                        action=agent.action(state)
+                        state,reward,done=env.step(action)
+                        total_reward+=reward
+                ave_reward=total_reward/TEST    
+                print('episode: ',episode,"Avarge Reward:",ave_reward)
+                if ave_reward>=200:
+                    #env.close()
+                    break
+            sum_of_reward = 0
+
+
+if __name__ == '__main__':
+    main()
