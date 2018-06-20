@@ -51,6 +51,10 @@ import org.json.JSONObject;
 import java.util.concurrent.BrokenBarrierException;
 import java.util.concurrent.CyclicBarrier;
 
+import static com.example.android.lunarlander.LunarView.LunarThread.PHYS_SPEED_MAX;
+import static com.example.android.lunarlander.LunarView.LunarThread.TARGET_BOTTOM_PADDING;
+import static com.example.android.lunarlander.LunarView.LunarThread.TARGET_PAD_HEIGHT;
+
 
 /**
  * View that draws, takes keystrokes, etc. for a simple LunarLander game.
@@ -913,7 +917,7 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
             if (mLastTime > now) return;
 
 //            double elapsed = (now - mLastTime) / 1000.0;
-            double elapsed = 0.2; // TODO don't do this at home
+            double elapsed = 0.1; // TODO don't do this at home
 
             // mRotating -- update heading
             if (mRotating != 0) {
@@ -1049,18 +1053,19 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
         private void publishCurrentGameState() throws Exception {
             double fuelUsed = prevFuelState > 0 ? prevFuelState - lunarThread.getFuel() : 0;
             prevFuelState = lunarThread.getFuel();
+            double landingPadHeight = TARGET_PAD_HEIGHT + lunarThread.mLanderHeight / 2 - TARGET_BOTTOM_PADDING;
             double mX = (lunarThread.mX - screenWidth / 2) / (screenWidth / 2);
-            double mY = lunarThread.mY / screenHeight;
-            double mDX = lunarThread.mDX * 0.2 / screenWidth;
-            double mDY = lunarThread.mDY * 0.2 / screenHeight;
+            double mY = (lunarThread.mY -  landingPadHeight) / screenHeight;
+            double mDX = lunarThread.mDX / 500;
+            double mDY = lunarThread.mDY / 500;
             double mHeading = lunarThread.mHeading * 0.0174532925;
 //            System.out.println("mX:" + mX);
 //            System.out.println("mY:" + mY);
-//            System.out.println("mDX:" + mDX);
-//            System.out.println("mDY:" + mDY);
-//            System.out.println("mHeading:" + mHeading);
-//            System.out.println("sqrtXY:" + Math.sqrt(Math.pow(mX, 2) + Math.pow(mY, 2)));
-//            System.out.println("sqrtDXDY:" + Math.sqrt(Math.pow(mDX, 2) + Math.pow(mDY, 2)));
+//            System.out.println("mDX:" + lunarThread.mDX);
+//            System.out.println("mDY:" + lunarThread.mDY);
+
+//            System.out.println("100*sqrtXY(x =" + mX + " , y = " + mY + "):" + -100 * Math.sqrt(Math.pow(mX, 2) + Math.pow(mY, 2)));
+//            System.out.println("100*sqrtDXDY(dx = " + mDX + " , dy = " + mDY + "):" + -100 * Math.sqrt(Math.pow(mDX, 2) + Math.pow(mDY, 2)));
             JSONObject lunarState = new JSONObject()
                     .put(LunarThread.KEY_X, mX)
                     .put(LunarThread.KEY_Y, mY)
@@ -1069,26 +1074,29 @@ class LunarView extends SurfaceView implements SurfaceHolder.Callback {
                     .put(LunarThread.KEY_HEADING, mHeading)
                     .put(LunarThread.KEY_ON_GOAL, lunarThread.mOnGoal);
 
+            mHeading = mHeading > Math.PI ? 2*Math.PI - mHeading : mHeading;
+//            System.out.println("mHeading:" + - 100 * mHeading);
             double reward = 0.0;
             double shaping = -100 * Math.sqrt(Math.pow(mX, 2) + Math.pow(mY, 2))
                     - 100 * Math.sqrt(Math.pow(mDX, 2) + Math.pow(mDY, 2))
-                    - 100 * Math.abs(mHeading > Math.PI ? 2*Math.PI - mHeading : mHeading) // transform degrees to radians
+                    - 100 * Math.abs(mHeading) // transform degrees to radians
                     + (lunarThread.mOnGoal ? 10 : 0) ;
             if(prevShapingExist){
                 reward = shaping - prevShaping;
             }
+            System.out.println("Shaping diff: " + reward);
 //            System.out.println("shaping:" + shaping);
 //            System.out.println("prevShaping:" + prevShaping);
-
+            System.out.println();
             reward -= 0.3 * fuelUsed;
-//            System.out.println("fuelUsed: " + -0.3 * fuelUsed);
+            System.out.println("fuelUsed: " + -0.3 * fuelUsed);
             boolean done = lunarThread.mMode != LunarThread.STATE_RUNNING;
 
             if(done){
                 if(lunarThread.mMode == LunarThread.STATE_WIN){
-                    reward = 300;
+                    reward = 100;
                 } else if(lunarThread.mMode == LunarThread.STATE_LOSE){
-                    reward = -150;
+                    reward = -100;
                 }
             }
 //            System.out.println("reward: " + reward);
